@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Statement Separator</title>
+    <style>
+        :root {
+            --primary: #1a5490;
+            --primary-dark: #124070;
+            --secondary: #c41e3a;
+            --success: #28a745;
+            --danger: #dc3545;
+            --warning: #ffc107;
+            --info: #17a2b8;
+            --light: #f8f9fa;
+            --dark: #343a40;
+            --gray: #6c757d;
+            --border: #dee2e6;
+            --shadow: 0 2px 10px rgba(0,0,0,0.1);
+            --radius: 8px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            min-height: 100vh;
+            color: var(--dark);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 30px;
+            border-radius: var(--radius);
+            margin-bottom: 25px;
+            box-shadow: var(--shadow);
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1rem;
+        }
+
+        /* Cards */
+        .card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+
+        .card-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 3px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 50px 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: var(--light);
+        }
+
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--primary);
+            background: rgba(26, 84, 144, 0.05);
+        }
+
+        .upload-area .icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+
+        .upload-area h3 {
+            color: var(--dark);
+            margin-bottom: 10px;
+        }
+
+        .upload-area p {
+            color: var(--gray);
+            font-size: 0.9rem;
+        }
+
+        .upload-area input[type="file"] {
+            display: none;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 20px;
+            border-radius: var(--radius);
+            text-align: center;
+        }
+
+        .stat-card.credit { background: linear-gradient(135deg, var(--success) 0%, #1e7e34 100%); }
+        .stat-card.debit { background: linear-gradient(135deg, var(--danger) 0%, #bd2130 100%); }
+        .stat-card.neutral { background: linear-gradient(135deg, var(--info) 0%, #117a8b 100%); }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--dark);
+            font-size: 0.9rem;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.95rem;
+            transition: border-color 0.3s;
+            font-family: inherit;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(26, 84, 144, 0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, var(--success) 0%, #1e7e34 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        .btn-outline {
+            background: white;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+        }
+
+        .btn-outline:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        /* Table */
+        .table-container {
+            overflow-x: auto;
+            margin-top: 20px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        thead {
+            background: var(--primary);
+            color: white;
+        }
+
+        th {
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        tbody tr:hover {
+            background: rgba(26, 84, 144, 0.05);
+        }
+
+        tbody tr:nth-child(even) {
+            background: var(--light);
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-cr { background: rgba(40, 167, 69, 0.15); color: var(--success); }
+        .badge-dr { background: rgba(220, 53, 69, 0.15); color: var(--danger); }
+
+        /* Alerts */
+        .alert {
+            padding: 15px 20px;
+            border-radius: var(--radius);
+            margin-bottom: 20px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .alert.show { display: flex; }
+
+        .alert-success {
+            background: rgba(40, 167, 69, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(40, 167, 69, 0.3);
+        }
+
+        .alert-error {
+            background: rgba(220, 53, 69, 0.1);
+            color: var(--danger);
+            border: 1px solid rgba(220, 53, 69, 0.3);
+        }
+
+        .alert-info {
+            background: rgba(23, 162, 184, 0.1);
+            color: var(--info);
+            border: 1px solid rgba(23, 162, 184, 0.3);
+        }
+
+        /* Loading */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.show { display: block; }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--success));
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        /* Hidden sections */
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header h1 { font-size: 1.5rem; }
+            .stats-grid { grid-template-columns: 1fr 1fr; }
+            .form-row { grid-template-columns: 1fr; }
+            .btn-group { flex-direction: column; }
+            .btn { width: 100%; justify-content: center; }
+        }
+
+        /* Branch Tags */
+        .branch-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .branch-tag {
+            padding: 6px 14px;
+            background: rgba(26, 84, 144, 0.1);
+            color: var(--primary);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid transparent;
+        }
+
+        .branch-tag:hover, .branch-tag.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        /* Amount Range */
+        .range-inputs {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .range-inputs input {
+            flex: 1;
+        }
+
+        .range-inputs span {
+            color: var(--gray);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🏦 Bank Statement Separator</h1>
+            <p>Extract, filter, and download transactions from PDF bank statements</p>
+        </div>
+
+        <!-- Alerts -->
+        <div id="alertBox" class="alert"></div>
+
+        <!-- Step 1: Upload -->
+        <div id="uploadSection" class="section active">
+            <div class="card">
+                <div class="card-title">
+                    <span>📤</span> Upload Bank Statement
+                </div>
+
+                <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                    <div class="icon">📄</div>
+                    <h3>Drop your PDF here or click to browse</h3>
+                    <p>Supports Sonali Bank, Janata Bank, Agrani Bank, and most PDF statements<br>
+                    Maximum file size: 16MB</p>
+                    <input type="file" id="fileInput" accept=".pdf" onchange="handleFileSelect(event)">
+                </div>
+
+                <div class="loading" id="uploadLoading">
+                    <div class="spinner"></div>
+                    <p>Parsing PDF and extracting transactions...</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="uploadProgress"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Statistics & Filters -->
+        <div id="statsSection" class="section">
+            <!-- Statistics -->
+            <div class="card">
+                <div class="card-title">
+                    <span>📊</span> Statement Overview
+                </div>
+                <div class="stats-grid" id="statsGrid">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="card">
+                <div class="card-title">
+                    <span>🔍</span> Filter Transactions
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Select Branch (click to filter)</label>
+                    <div class="branch-tags" id="branchTags">
+                        <!-- Populated by JS -->
+                    </div>
+                    <input type="hidden" id="branchFilter" value="">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Start Date</label>
+                        <input type="date" class="form-control" id="startDate">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">End Date</label>
+                        <input type="date" class="form-control" id="endDate">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Min Amount (BDT)</label>
+                        <input type="number" class="form-control" id="minAmount" placeholder="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Max Amount (BDT)</label>
+                        <input type="number" class="form-control" id="maxAmount" placeholder="Unlimited">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Transaction Type</label>
+                        <select class="form-control" id="txnType">
+                            <option value="">All Types</option>
+                            <option value="CR">Credit (CR)</option>
+                            <option value="DR">Debit (DR)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Keyword in Description</label>
+                        <input type="text" class="form-control" id="keyword" placeholder="e.g., BANNER, LOAN, etc.">
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="applyFilters()">
+                        <span>🔍</span> Apply Filters
+                    </button>
+                    <button class="btn btn-outline" onclick="resetFilters()">
+                        <span>↩️</span> Reset
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Results -->
+        <div id="resultsSection" class="section">
+            <div class="card">
+                <div class="card-title">
+                    <span>📋</span> Filtered Results
+                    <span id="resultCount" style="margin-left: auto; font-size: 0.9rem; color: var(--gray);"></span>
+                </div>
+
+                <div class="loading" id="filterLoading">
+                    <div class="spinner"></div>
+                    <p>Applying filters...</p>
+                </div>
+
+                <div id="resultsContent">
+                    <div class="stats-grid" id="filterStats" style="margin-bottom: 20px;">
+                        <!-- Filter stats -->
+                    </div>
+
+                    <div class="table-container">
+                        <table id="resultsTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Value Date</th>
+                                    <th>Description</th>
+                                    <th>Type</th>
+                                    <th>Amount (BDT)</th>
+                                    <th>Balance (BDT)</th>
+                                    <th>Branch</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsBody">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="btn-group" style="margin-top: 25px;">
+                        <button class="btn btn-success" onclick="downloadFile('pdf')">
+                            <span>📄</span> Download PDF
+                        </button>
+                        <button class="btn btn-success" onclick="downloadFile('csv')">
+                            <span>📊</span> Download CSV
+                        </button>
+                        <button class="btn btn-success" onclick="downloadFile('json')">
+                            <span>💾</span> Download JSON
+                        </button>
+                        <button class="btn btn-outline" onclick="newUpload()">
+                            <span>🔄</span> New File
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentFileId = null;
+        let allTransactions = [];
+
+        // Drag and drop
+        const uploadArea = document.getElementById('uploadArea');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => uploadArea.classList.add('dragover'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => uploadArea.classList.remove('dragover'), false);
+        });
+
+        uploadArea.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length) handleFile(files[0]);
+        }
+
+        function handleFileSelect(e) {
+            if (e.target.files.length) handleFile(e.target.files[0]);
+        }
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.pdf')) {
+                showAlert('Please upload a PDF file', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            document.getElementById('uploadLoading').classList.add('show');
+            document.getElementById('uploadArea').style.display = 'none';
+
+            // Simulate progress
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress > 90) progress = 90;
+                document.getElementById('uploadProgress').style.width = progress + '%';
+            }, 200);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                clearInterval(progressInterval);
+                document.getElementById('uploadProgress').style.width = '100%';
+
+                if (data.error) {
+                    showAlert(data.error, 'error');
+                    resetUpload();
+                    return;
+                }
+
+                currentFileId = data.file_id;
+                allTransactions = data.sample_transactions;
+
+                showStats(data.statistics);
+                showBranches(data.branches);
+
+                document.getElementById('uploadSection').classList.remove('active');
+                document.getElementById('statsSection').classList.add('active');
+
+                showAlert(`✓ Successfully parsed ${data.statistics.total_transactions} transactions`, 'success');
+            })
+            .catch(err => {
+                clearInterval(progressInterval);
+                showAlert('Upload failed: ' + err.message, 'error');
+                resetUpload();
+            });
+        }
+
+        function resetUpload() {
+            document.getElementById('uploadLoading').classList.remove('show');
+            document.getElementById('uploadArea').style.display = 'block';
+            document.getElementById('uploadProgress').style.width = '0%';
+            document.getElementById('fileInput').value = '';
+        }
+
+        function showStats(stats) {
+            const grid = document.getElementById('statsGrid');
+            grid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.total_transactions}</div>
+                    <div class="stat-label">Total Transactions</div>
+                </div>
+                <div class="stat-card credit">
+                    <div class="stat-value">${stats.credit_count}</div>
+                    <div class="stat-label">Credit Transactions</div>
+                </div>
+                <div class="stat-card debit">
+                    <div class="stat-value">${stats.debit_count}</div>
+                    <div class="stat-label">Debit Transactions</div>
+                </div>
+                <div class="stat-card neutral">
+                    <div class="stat-value">${stats.branches}</div>
+                    <div class="stat-label">Branches</div>
+                </div>
+                <div class="stat-card credit">
+                    <div class="stat-value">₹${stats.total_credit.toLocaleString('en-IN', {maximumFractionDigits: 0})}</div>
+                    <div class="stat-label">Total Credit</div>
+                </div>
+                <div class="stat-card debit">
+                    <div class="stat-value">₹${stats.total_debit.toLocaleString('en-IN', {maximumFractionDigits: 0})}</div>
+                    <div class="stat-label">Total Debit</div>
+                </div>
+            `;
+
+            // Set date range inputs
+            if (stats.date_range && stats.date_range[0]) {
+                document.getElementById('startDate').value = formatDateForInput(stats.date_range[0]);
+                document.getElementById('endDate').value = formatDateForInput(stats.date_range[1]);
+            }
+        }
+
+        function showBranches(branches) {
+            const container = document.getElementById('branchTags');
+            container.innerHTML = branches.map(b => 
+                `<span class="branch-tag" onclick="selectBranch(this, '${b.replace(/'/g, "\'")}')">${b}</span>`
+            ).join('');
+        }
+
+        function selectBranch(element, branch) {
+            document.querySelectorAll('.branch-tag').forEach(t => t.classList.remove('active'));
+            element.classList.add('active');
+            document.getElementById('branchFilter').value = branch;
+        }
+
+        function formatDateForInput(dateStr) {
+            const d = new Date(dateStr);
+            return d.toISOString().split('T')[0];
+        }
+
+        function applyFilters() {
+            const filters = {
+                branch: document.getElementById('branchFilter').value,
+                start_date: document.getElementById('startDate').value,
+                end_date: document.getElementById('endDate').value,
+                min_amount: document.getElementById('minAmount').value,
+                max_amount: document.getElementById('maxAmount').value,
+                transaction_type: document.getElementById('txnType').value,
+                keyword: document.getElementById('keyword').value
+            };
+
+            document.getElementById('filterLoading').classList.add('show');
+            document.getElementById('resultsContent').style.display = 'none';
+
+            fetch('/filter', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(filters)
+            })
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('filterLoading').classList.remove('show');
+                document.getElementById('resultsContent').style.display = 'block';
+
+                if (data.error) {
+                    showAlert(data.error, 'error');
+                    return;
+                }
+
+                showResults(data);
+                document.getElementById('statsSection').classList.remove('active');
+                document.getElementById('resultsSection').classList.add('active');
+            })
+            .catch(err => {
+                document.getElementById('filterLoading').classList.remove('show');
+                showAlert('Filter failed: ' + err.message, 'error');
+            });
+        }
+
+        function showResults(data) {
+            document.getElementById('resultCount').textContent = `${data.filtered_count} transactions found`;
+
+            // Filter stats
+            const statsDiv = document.getElementById('filterStats');
+            statsDiv.innerHTML = `
+                <div class="stat-card credit">
+                    <div class="stat-value">₹${data.total_credit.toLocaleString('en-IN', {maximumFractionDigits: 2})}</div>
+                    <div class="stat-label">Total Credit</div>
+                </div>
+                <div class="stat-card debit">
+                    <div class="stat-value">₹${data.total_debit.toLocaleString('en-IN', {maximumFractionDigits: 2})}</div>
+                    <div class="stat-label">Total Debit</div>
+                </div>
+                <div class="stat-card neutral">
+                    <div class="stat-value">₹${data.net_amount.toLocaleString('en-IN', {maximumFractionDigits: 2})}</div>
+                    <div class="stat-label">Net Amount</div>
+                </div>
+            `;
+
+            // Table
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = data.transactions.map(t => `
+                <tr>
+                    <td>${t.date}</td>
+                    <td>${t.value_date}</td>
+                    <td>${t.description}</td>
+                    <td><span class="badge badge-${t.transaction_type.toLowerCase()}">${t.transaction_type}</span></td>
+                    <td style="text-align: right; font-weight: 600;">${t.amount.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                    <td style="text-align: right;">${t.balance.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                    <td>${t.branch}</td>
+                </tr>
+            `).join('');
+        }
+
+        function downloadFile(format) {
+            window.open(`/download/${format}`, '_blank');
+        }
+
+        function resetFilters() {
+            document.getElementById('branchFilter').value = '';
+            document.querySelectorAll('.branch-tag').forEach(t => t.classList.remove('active'));
+            document.getElementById('txnType').value = '';
+            document.getElementById('keyword').value = '';
+            document.getElementById('minAmount').value = '';
+            document.getElementById('maxAmount').value = '';
+        }
+
+        function newUpload() {
+            fetch('/clear')
+            .then(() => {
+                location.reload();
+            });
+        }
+
+        function showAlert(message, type) {
+            const alert = document.getElementById('alertBox');
+            alert.className = `alert alert-${type} show`;
+            alert.innerHTML = message;
+            setTimeout(() => alert.classList.remove('show'), 5000);
+        }
+    </script>
+</body>
+</html>
