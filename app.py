@@ -1,11 +1,44 @@
-#!/usr/bin/env python3
+# Write the file directly with proper escaping
+# I'll construct it carefully to avoid double-escaping issues
+
+with open('/mnt/agents/output/app.py', 'w', encoding='utf-8') as f:
+    f.write(r'''#!/usr/bin/env python3
 """
 PDF Bank Statement Transaction Separator - Web App
-Robust version with graceful dependency handling.
+Ultra-robust version: app defined first, everything else wrapped.
 """
 
 import os
 import sys
+
+# ============================================================
+# CRITICAL: Define app IMMEDIATELY before any imports that could fail
+# ============================================================
+from flask import Flask, render_template, request, jsonify, send_file, session
+from werkzeug.utils import secure_filename
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
+app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['OUTPUT_FOLDER'] = 'outputs'
+app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
+
+for folder in [app.config['UPLOAD_FOLDER'], app.config['OUTPUT_FOLDER']]:
+    os.makedirs(folder, exist_ok=True)
+
+# CORS headers
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
+# ============================================================
+# Now import optional libraries with maximum safety
+# ============================================================
+
 import re
 import json
 import uuid
@@ -15,28 +48,24 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Any
 
-from flask import Flask, render_template, request, jsonify, send_file, session, make_response
-from werkzeug.utils import secure_filename
+# PDF extraction - try multiple options
+PDF_EXTRACTOR = None
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['OUTPUT_FOLDER'] = 'outputs'
-app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
+try:
+    import pdfplumber
+    PDF_EXTRACTOR = 'pdfplumber'
+except ImportError:
+    pass
 
-for folder in [app.config['UPLOAD_FOLDER'], app.config['OUTPUT_FOLDER']]:
-    os.makedirs(folder, exist_ok=True)
+if not PDF_EXTRACTOR:
+    try:
+        import PyPDF2
+        PDF_EXTRACTOR = 'pypdf2'
+    except ImportError:
+        pass
 
-# CORS headers for all responses
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    return response
-
-# Optional imports with graceful fallback
+# ReportLab for PDF generation
+REPORTLAB_OK = False
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -44,31 +73,13 @@ try:
     from reportlab.lib.colors import HexColor, black, white
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    REPORTLAB_AVAILABLE = True
+    REPORTLAB_OK = True
 except ImportError as e:
     print(f"[WARNING] reportlab not available: {e}", file=sys.stderr)
-    REPORTLAB_AVAILABLE = False
 
-try:
-    import pdfplumber
-    PDFPLUMBER_AVAILABLE = True
-except ImportError as e:
-    print(f"[WARNING] pdfplumber not available: {e}", file=sys.stderr)
-    PDFPLUMBER_AVAILABLE = False
-
-try:
-    import PyPDF2
-    PYPDF2_AVAILABLE = True
-except ImportError as e:
-    print(f"[WARNING] PyPDF2 not available: {e}", file=sys.stderr)
-    PYPDF2_AVAILABLE = False
-
-try:
-    import pandas as pd
-    PANDAS_AVAILABLE = True
-except ImportError:
-    PANDAS_AVAILABLE = False
-
+# ============================================================
+# Data models
+# ============================================================
 
 @dataclass
 class Transaction:
@@ -95,22 +106,23 @@ class PDFStatementParser:
 
     def extract_text(self) -> str:
         text = ""
-        if PDFPLUMBER_AVAILABLE:
+        if PDF_EXTRACTOR == 'pdfplumber':
             try:
                 text = self._extract_pdfplumber()
             except Exception as e:
                 self.parse_errors.append(f"pdfplumber: {str(e)}")
-        if not text and PYPDF2_AVAILABLE:
+        elif PDF_EXTRACTOR == 'pypdf2':
             try:
                 text = self._extract_pypdf2()
             except Exception as e:
-                self.parse_errors.append(f"PyPDF2: {str(e)}")
-        if not text:
-            self.parse_errors.append("No PDF text extraction method available")
+                self.parse_errors.append(f"pypdf2: {str(e)}")
+        else:
+            self.parse_errors.append("No PDF extraction library available. Install pdfplumber or PyPDF2.")
         self.raw_text = text
         return text
 
     def _extract_pdfplumber(self) -> str:
+        import pdfplumber
         text = ""
         with pdfplumber.open(self.pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages, 1):
@@ -120,6 +132,7 @@ class PDFStatementParser:
         return text
 
     def _extract_pypdf2(self) -> str:
+        import PyPDF2
         text = ""
         with open(self.pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
@@ -396,7 +409,7 @@ class StatementGenerator:
         self.output_path = Path(output_path)
 
     def generate_pdf(self, transactions: List[Transaction], title: str = "Filtered Statement"):
-        if not REPORTLAB_AVAILABLE:
+        if not REPORTLAB_OK:
             raise ImportError("reportlab not available")
         doc = SimpleDocTemplate(
             str(self.output_path), pagesize=A4,
@@ -688,7 +701,7 @@ def download_file(format):
     account_info = session.get('account_info', {})
     unique_id = str(uuid.uuid4())[:8]
     if format == 'pdf':
-        if not REPORTLAB_AVAILABLE:
+        if not REPORTLAB_OK:
             return jsonify({'error': 'PDF generation not available. Install reportlab.'}), 500
         output_path = os.path.join(app.config['OUTPUT_FOLDER'], f"filtered_{unique_id}.pdf")
         generator = StatementGenerator(account_info, output_path)
@@ -756,3 +769,17 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     app.run(host='0.0.0.0', port=port, debug=debug)
+''')
+
+print("Fixed app.py written successfully!")
+
+# Verify by reading back and checking for syntax errors
+import ast
+try:
+    with open('/mnt/agents/output/app.py', 'r') as f:
+        code = f.read()
+    ast.parse(code)
+    print("Syntax check: PASSED")
+    print(f"Total lines: {len(code.splitlines())}")
+except SyntaxError as e:
+    print(f"Syntax error: {e}")
