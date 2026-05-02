@@ -6,8 +6,7 @@ A Flask web application for extracting and filtering transactions from PDF bank 
 Deployable on Koyeb, Railway, Render, Heroku, etc.
 
 Modern Hybrid Parser:
-- pdfplumber for layout-aware table extraction
-- Camelot for lattice/grid table fallback
+- pdfplumber for layout-aware table extraction (optional)
 - Advanced regex with multi-line description handling
 - Indian number format support (1,26,480.00)
 - OCR artifact cleanup (cR->CR, whitespace normalization)
@@ -27,9 +26,8 @@ from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_file, flash, redirect, url_for, session
 from werkzeug.utils import secure_filename
 
-# PDF and Report generation
+# Core PDF libraries (always required)
 try:
-    import pdfplumber
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -37,20 +35,28 @@ try:
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
     from reportlab.pdfgen import canvas
-    from reportlab.graphics.shapes import Drawing
-    from reportlab.graphics.charts.barcharts import VerticalBarChart
-    from reportlab.graphics.charts.piecharts import Pie
+    REPORTLAB_AVAILABLE = True
 except ImportError:
-    os.system("pip install pdfplumber reportlab -q")
-    import pdfplumber
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.units import mm
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.colors import HexColor, black, white, Color
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
+    REPORTLAB_AVAILABLE = False
+    print("WARNING: reportlab not available. PDF generation disabled.")
 
-# Optional: Camelot for advanced table extraction (install with: pip install camelot-py[cv])
+# Optional: pdfplumber for advanced extraction
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
+    print("WARNING: pdfplumber not available. Using PyPDF2 fallback.")
+
+# Optional: PyPDF2 as fallback
+try:
+    import PyPDF2
+    PYPDF2_AVAILABLE = True
+except ImportError:
+    PYPDF2_AVAILABLE = False
+    print("WARNING: PyPDF2 not available. Text extraction may fail.")
+
+# Optional: Camelot for table extraction
 try:
     import camelot
     CAMELOT_AVAILABLE = True
@@ -97,9 +103,9 @@ class PDFStatementParser:
     Modern hybrid parser for Bangladeshi bank statements.
 
     Parsing strategy (in order of preference):
-    1. pdfplumber table extraction (layout-aware)
-    2. Camelot lattice extraction (grid-based tables)
-    3. Advanced regex with multi-line description handling
+    1. pdfplumber table extraction (layout-aware) - if available
+    2. Advanced regex with multi-line description handling
+    3. Simple regex fallback
     """
 
     def __init__(self, pdf_path: str):
@@ -116,50 +122,62 @@ class PDFStatementParser:
     # ========================================================================
 
     def extract_text(self) -> str:
-        """Extract text using pdfplumber with layout preservation."""
+        """Extract text using best available method."""
         text = ""
-        try:
-            with pdfplumber.open(self.pdf_path) as pdf:
-                for page_num, page in enumerate(pdf.pages, 1):
-                    # Extract with layout preservation
-                    page_text = page.extract_text(layout=True)
-                    if page_text:
-                        text += f"\n--- PAGE {page_num} ---\n" + page_text + "\n"
 
-                    # Store page metadata for table extraction
-                    self.page_layouts.append({
-                        'page': page_num,
-                        'width': page.width,
-                        'height': page.height,
-                        'chars': len(page_text) if page_text else 0
-                    })
-
-                    # Extract tables using pdfplumber
-                    tables = page.extract_tables()
-                    for table in tables:
-                        if table and len(table) > 1:
-                            self.df_pages.append({
-                                'page': page_num,
-                                'type': 'pdfplumber_table',
-                                'data': table
-                            })
-        except Exception as e:
-            self.parse_errors.append(f"pdfplumber error: {str(e)}")
-
-        # Fallback to Camelot for lattice tables
-        if CAMELOT_AVAILABLE and not self.df_pages:
+        # Try pdfplumber first (best quality)
+        if PDFPLUMBER_AVAILABLE:
             try:
-                tables = camelot.read_pdf(str(self.pdf_path), pages='all', flavor='lattice')
-                for i, table in enumerate(tables):
-                    self.df_pages.append({
-                        'page': table.page,
-                        'type': 'camelot_lattice',
-                        'data': table.data
-                    })
+                text = self._extract_with_pdfplumber()
             except Exception as e:
-                self.parse_errors.append(f"Camelot error: {str(e)}")
+                self.parse_errors.append(f"pdfplumber error: {str(e)}")
+
+        # Fallback to PyPDF2
+        if not text and PYPDF2_AVAILABLE:
+            try:
+                text = self._extract_with_pypdf2()
+            except Exception as e:
+                self.parse_errors.append(f"PyPDF2 error: {str(e)}")
 
         self.raw_text = text
+        return text
+
+    def _extract_with_pdfplumber(self) -> str:
+        """Extract text using pdfplumber with layout preservation."""
+        text = ""
+        with pdfplumber.open(self.pdf_path) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                page_text = page.extract_text(layout=True)
+                if page_text:
+                    text += f"\n--- PAGE {page_num} ---\n" + page_text + "\n"
+
+                self.page_layouts.append({
+                    'page': page_num,
+                    'width': page.width,
+                    'height': page.height,
+                    'chars': len(page_text) if page_text else 0
+                })
+
+                # Extract tables
+                tables = page.extract_tables()
+                for table in tables:
+                    if table and len(table) > 1:
+                        self.df_pages.append({
+                            'page': page_num,
+                            'type': 'pdfplumber_table',
+                            'data': table
+                        })
+        return text
+
+    def _extract_with_pypdf2(self) -> str:
+        """Extract text using PyPDF2 as fallback."""
+        text = ""
+        with open(self.pdf_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page_num, page in enumerate(pdf_reader.pages, 1):
+                page_text = page.extract_text()
+                if page_text:
+                    text += f"\n--- PAGE {page_num} ---\n" + page_text + "\n"
         return text
 
     # ========================================================================
@@ -169,20 +187,20 @@ class PDFStatementParser:
     def parse_transactions(self) -> List[Transaction]:
         """Parse transactions using multi-strategy approach."""
 
-        # Strategy 1: Parse from extracted tables (DataFrames)
+        # Strategy 1: Parse from extracted tables
         if self.df_pages:
             for page_data in self.df_pages:
                 self._parse_from_table_data(page_data)
 
-        # Strategy 2: If tables failed or incomplete, use advanced regex on raw text
+        # Strategy 2: Advanced regex on raw text
         if not self.transactions:
             self._parse_from_text_advanced()
 
-        # Strategy 3: If still no transactions, try simple regex fallback
+        # Strategy 3: Simple regex fallback
         if not self.transactions:
             self._parse_from_text_simple()
 
-        # Post-processing: clean up descriptions and normalize
+        # Post-processing
         self._post_process_transactions()
 
         return self.transactions
@@ -198,7 +216,6 @@ class PDFStatementParser:
         if not table or len(table) < 2:
             return
 
-        # Convert to DataFrame if pandas available
         if PANDAS_AVAILABLE:
             try:
                 df = pd.DataFrame(table[1:], columns=table[0] if table[0] else None)
@@ -222,13 +239,11 @@ class PDFStatementParser:
             except Exception as e:
                 self.parse_errors.append(f"Table row parse error: {str(e)}")
 
-    def _parse_from_dataframe(self, df: pd.DataFrame, page_num: int):
+    def _parse_from_dataframe(self, df: Any, page_num: int):
         """Parse from pandas DataFrame."""
-        # Normalize column names
         original_cols = list(df.columns)
         df.columns = [str(c).strip().upper().replace(' ', '_').replace('.', '') for c in df.columns]
 
-        # Map Sonali Bank columns (flexible matching)
         column_map = {}
         for col in df.columns:
             col_upper = str(col).upper()
@@ -263,14 +278,12 @@ class PDFStatementParser:
         """Parse a single DataFrame row into Transaction."""
         row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
 
-        # Extract date
         date_str = self._extract_date(str(row_dict.get('date', '')))
         if not date_str:
             return None
 
         value_date = self._extract_date(str(row_dict.get('value_date', date_str)))
 
-        # Extract amounts
         debit = self._parse_amount(str(row_dict.get('debit', '0')))
         credit = self._parse_amount(str(row_dict.get('credit', '0')))
 
@@ -281,24 +294,13 @@ class PDFStatementParser:
             amount = debit
             txn_type = 'DR'
         else:
-            # Check raw text for CR/DR indicators
             raw = str(row_dict)
-            if 'CR' in raw:
-                txn_type = 'CR'
-            elif 'DR' in raw:
-                txn_type = 'DR'
-            else:
-                txn_type = 'CR'
+            txn_type = 'CR' if 'CR' in raw else 'DR'
             amount = 0.0
 
-        # Balance
         balance = self._parse_amount(str(row_dict.get('balance', '0')))
-
-        # Description & Branch
         desc = str(row_dict.get('description', ''))
         branch = str(row_dict.get('branch', 'Unknown'))
-
-        # Clean description
         desc = self._clean_description(desc, amount, balance)
 
         return Transaction(
@@ -317,7 +319,6 @@ class PDFStatementParser:
         if not row or len(row) < 3:
             return None
 
-        # Try to identify columns by content
         date_str = None
         value_date = None
         description = ""
@@ -331,42 +332,36 @@ class PDFStatementParser:
                 continue
             cell_str = str(cell).strip()
 
-            # Date detection
             if not date_str:
                 dm = re.match(r'(\d{2}-[A-Za-z]{3}-\d{4})', cell_str)
                 if dm:
                     date_str = dm.group(1)
                     continue
 
-            # Value date detection
             if date_str and not value_date:
                 dm = re.match(r'(\d{2}-[A-Za-z]{3}-\d{4})', cell_str)
                 if dm and dm.group(1) != date_str:
                     value_date = dm.group(1)
                     continue
 
-            # Amount detection
             amts = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', cell_str)
             if amts:
                 for amt_str in amts:
                     amt = float(amt_str.replace(',', ''))
                     if 'CR' in cell_str or 'cr' in cell_str:
                         credit = amt
-                    elif 'DR' in cell_str or 'dr' in cell_str or 'Debit' in cell_str:
+                    elif 'DR' in cell_str or 'dr' in cell_str:
                         debit = amt
                     elif credit == 0 and debit == 0:
-                        # Assume first amount is transaction, second is balance
                         if amount == 0:
                             amount = amt
                         else:
                             balance = amt
 
-            # Branch detection
             bm = re.search(r'([A-Za-z\s]+Branch)', cell_str, re.I)
             if bm:
                 branch = bm.group(1).strip()
 
-            # Description accumulation
             if not re.match(r'^(CR|DR|Balance|Total|\d{1,3}(?:,\d{3})*\.\d{2})$', cell_str):
                 description += " " + cell_str
 
@@ -406,8 +401,6 @@ class PDFStatementParser:
         Handles Sonali Bank's complex layout with wrapped descriptions.
         """
         date_pattern = r'\d{2}-[A-Za-z]{3}-\d{4}'
-
-        # Split into pages
         pages = re.split(r'--- PAGE (\d+) ---', self.raw_text)
 
         for idx in range(1, len(pages), 2):
@@ -425,12 +418,10 @@ class PDFStatementParser:
             while i < len(lines):
                 line = lines[i].strip()
 
-                # Skip header/footer lines
                 if self._is_header_footer(line):
                     i += 1
                     continue
 
-                # Match date pattern at start: "06-Jan-2025  06-Jan-2025"
                 date_match = re.match(
                     rf'^({date_pattern})\s+({date_pattern})(.*)', 
                     line
@@ -449,48 +440,37 @@ class PDFStatementParser:
                     branch = "Unknown"
                     txn_type = 'CR'
 
-                    # Look ahead for continuation lines
                     j = i + 1
                     while j < len(lines):
                         next_line = lines[j].strip()
 
-                        # Stop conditions
                         if self._is_transaction_boundary(next_line, date_pattern):
                             break
 
-                        # Extract amounts
                         amts = re.findall(r'\d{1,3}(?:,\d{3})*\.\d{2}', next_line)
                         amounts.extend(amts)
 
-                        # Determine type
                         if re.search(r'\bCR\b', next_line):
                             txn_type = 'CR'
                         elif re.search(r'\bDR\b', next_line):
                             txn_type = 'DR'
 
-                        # Extract branch
                         branch = self._extract_branch(next_line) or branch
 
-                        # Add to description (filter out pure amounts/labels)
                         if not self._is_amount_only_line(next_line):
                             desc_lines.append(next_line)
 
                         j += 1
 
-                    # Build full description
                     full_text = ' '.join(desc_lines)
-
-                    # Parse amounts
                     amount, balance = self._parse_amounts_from_list(amounts, txn_type)
 
                     if amount is None:
                         i = j if j > i else i + 1
                         continue
 
-                    # Clean description
                     description = self._clean_description(full_text, amount, balance)
 
-                    # Fallback branch extraction
                     if branch == "Unknown" and desc_lines:
                         branch = self._extract_branch(desc_lines[0]) or "Unknown"
 
@@ -511,10 +491,8 @@ class PDFStatementParser:
                 i += 1
 
     def _parse_from_text_simple(self):
-        """Simple fallback regex parser for basic cases."""
+        """Simple fallback regex parser."""
         date_pattern = r'\d{2}-[A-Za-z]{3}-\d{4}'
-
-        # Find all date-date patterns and extract surrounding context
         pattern = re.compile(
             rf'({date_pattern})\s+({date_pattern})\s+(.*?)\s+(\d{{1,3}}(?:,\d{{3}})*\.\d{{2}})\s+(\d{{1,3}}(?:,\d{{3}})*\.\d{{2}})',
             re.DOTALL
@@ -523,15 +501,12 @@ class PDFStatementParser:
         matches = pattern.findall(self.raw_text)
         for match in matches:
             txn_date, value_date, desc, amt_str, bal_str = match
-
             amount = float(amt_str.replace(',', ''))
             balance = float(bal_str.replace(',', ''))
-
             txn_type = 'CR' if 'CR' in desc else 'DR'
-
             description = self._clean_description(desc, amount, balance)
 
-            txn = Transaction(
+            self.transactions.append(Transaction(
                 date=txn_date,
                 value_date=value_date,
                 description=description,
@@ -540,8 +515,7 @@ class PDFStatementParser:
                 balance=balance,
                 branch="Unknown",
                 raw_text=desc[:200]
-            )
-            self.transactions.append(txn)
+            ))
 
     # ========================================================================
     # HELPER METHODS
@@ -580,16 +554,13 @@ class PDFStatementParser:
         for pattern in header_patterns:
             if re.match(pattern, line, re.IGNORECASE):
                 return True
-
         return False
 
     def _is_transaction_boundary(self, line: str, date_pattern: str) -> bool:
         """Check if line marks the end of current transaction."""
-        # Next transaction starts
         if re.match(rf'^{date_pattern}', line):
             return True
 
-        # Page/footer markers
         boundary_patterns = [
             r'^Total\s*$',
             r'^Page \d+ of \d+',
@@ -605,21 +576,15 @@ class PDFStatementParser:
         for pattern in boundary_patterns:
             if re.match(pattern, line, re.IGNORECASE):
                 return True
-
         return False
 
     def _is_amount_only_line(self, line: str) -> bool:
         """Check if line contains only amounts/labels."""
         stripped = line.strip()
-
-        # Pure amounts
         if re.match(r'^\d{1,3}(?:,\d{3})*\.\d{2}$', stripped):
             return True
-
-        # Labels
         if stripped in ['CR', 'DR', 'Balance', 'Total', 'Credit', 'Debit']:
             return True
-
         return False
 
     def _extract_branch(self, text: str) -> Optional[str]:
@@ -640,17 +605,12 @@ class PDFStatementParser:
             bm = re.search(pattern, text, re.IGNORECASE)
             if bm:
                 return bm.group(1).strip()
-
         return None
 
     def _parse_amounts_from_list(self, amounts: List[str], txn_type: str) -> tuple:
-        """
-        Parse amount and balance from list of amount strings.
-        Returns (amount, balance) or (None, None) if invalid.
-        """
+        """Parse amount and balance from list of amount strings."""
         if len(amounts) >= 2:
             try:
-                # Last two are typically amount and balance
                 amount = float(amounts[-2].replace(',', ''))
                 balance = float(amounts[-1].replace(',', ''))
                 return amount, balance
@@ -670,7 +630,6 @@ class PDFStatementParser:
         match = re.search(r'(\d{2})-([A-Za-z]{3})-(\d{4})', text)
         if match:
             day, month, year = match.groups()
-            # Normalize month to title case
             month = month.title()
             return f"{day}-{month}-{year}"
         return ""
@@ -679,9 +638,7 @@ class PDFStatementParser:
         """Parse amount with comma handling and Indian numbering."""
         if not text or text.strip() in ['', '-', 'nan', 'None', 'null']:
             return 0.0
-
         try:
-            # Remove all commas first
             cleaned = text.replace(',', '').strip()
             return float(cleaned)
         except ValueError:
@@ -692,13 +649,9 @@ class PDFStatementParser:
         if not text:
             return ""
 
-        # Remove amount strings
         text = re.sub(r'\d{1,3}(?:,\d{3})*\.\d{2}', '', text)
-
-        # Remove CR/DR markers (case insensitive)
         text = re.sub(r'\b(CR|DR|cr|dr)\b', '', text)
 
-        # Remove common noise words
         noise_words = [
             'Balance B/F', 'Balance C/F', 'Opening Balance', 'Closing Balance',
             'Total', 'Page', 'User ID', 'Generated By', 'Print Date', 'Print Time',
@@ -708,29 +661,17 @@ class PDFStatementParser:
         for word in noise_words:
             text = text.replace(word, '')
 
-        # Clean whitespace
         text = re.sub(r'\s+', ' ', text).strip()
-
-        # Remove leading/trailing punctuation
         text = text.strip('.,;:- ')
-
-        # Truncate to reasonable length
         return text[:150]
 
     def _post_process_transactions(self):
         """Post-process all transactions for consistency."""
         for txn in self.transactions:
-            # Ensure date format is consistent
             txn.date = self._normalize_date(txn.date)
             txn.value_date = self._normalize_date(txn.value_date)
-
-            # Clean up branch names
             txn.branch = self._normalize_branch(txn.branch)
-
-            # Ensure transaction type is uppercase
             txn.transaction_type = txn.transaction_type.upper()
-
-            # Round amounts
             txn.amount = round(txn.amount, 2)
             txn.balance = round(txn.balance, 2)
 
@@ -738,29 +679,20 @@ class PDFStatementParser:
         """Normalize date string to DD-Mmm-YYYY format."""
         if not date_str:
             return ""
-
         match = re.match(r'(\d{2})-([A-Za-z]{3})-(\d{4})', date_str)
         if match:
             day, month, year = match.groups()
             month = month.title()
             return f"{day}-{month}-{year}"
-
         return date_str
 
     def _normalize_branch(self, branch: str) -> str:
         """Normalize branch name."""
         if not branch or branch == "Unknown":
             return "Unknown"
-
-        # Clean up common variations
         branch = branch.strip()
-
-        # Remove trailing punctuation
         branch = branch.rstrip('.,;')
-
-        # Standardize "Chattogram" spellings
         branch = re.sub(r'Chatt?ogram', 'Chattogram', branch, flags=re.I)
-
         return branch
 
     # ========================================================================
@@ -849,6 +781,9 @@ class StatementGenerator:
 
     def generate_pdf(self, transactions: List[Transaction], title: str = "Filtered Statement"):
         """Generate professional PDF statement."""
+        if not REPORTLAB_AVAILABLE:
+            raise ImportError("reportlab is required for PDF generation")
+
         doc = SimpleDocTemplate(
             str(self.output_path),
             pagesize=A4,
@@ -867,7 +802,6 @@ class StatementGenerator:
                                       spaceAfter=2, alignment=TA_CENTER, fontName='Helvetica')
         normal_style = ParagraphStyle('Normal', fontSize=8, textColor=black, spaceAfter=2, fontName='Helvetica')
 
-        # Bank Header
         elements.append(Paragraph("Sonali Bank PLC", title_style))
         elements.append(Paragraph("Statement Transaction Separator", header_style))
         elements.append(Spacer(1, 4))
@@ -876,14 +810,12 @@ class StatementGenerator:
         elements.append(HRFlowable(width="100%", thickness=1, color=HexColor('#1a5490')))
         elements.append(Spacer(1, 8))
 
-        # Statement Title
         elements.append(Paragraph(title.upper(), ParagraphStyle(
             'StatementTitle', fontSize=16, textColor=HexColor('#1a5490'),
             spaceAfter=8, alignment=TA_CENTER, fontName='Helvetica-Bold'
         )))
         elements.append(Spacer(1, 6))
 
-        # Account Info
         info_data = [
             [Paragraph("<b>Account Holder:</b>", normal_style),
              Paragraph(self.account_info.get('account_holder', 'N/A'), ParagraphStyle('Bold', fontSize=8, fontName='Helvetica-Bold'))],
@@ -1031,20 +963,27 @@ def upload_file():
     if not allowed_file(file.filename):
         return jsonify({'error': 'Only PDF files are allowed'}), 400
 
-    # Generate unique filename
     unique_id = str(uuid.uuid4())[:8]
     filename = secure_filename(f"{unique_id}_{file.filename}")
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
 
-    # Parse PDF with modern hybrid parser
-    parser = PDFStatementParser(filepath)
-    parser.extract_text()
-    parser.parse_account_info()
-    parser.parse_transactions()
+    try:
+        parser = PDFStatementParser(filepath)
+        parser.extract_text()
+        parser.parse_account_info()
+        parser.parse_transactions()
+    except Exception as e:
+        os.remove(filepath)
+        return jsonify({
+            'error': f'PDF parsing failed: {str(e)}',
+            'debug_info': {
+                'exception_type': type(e).__name__,
+                'exception_message': str(e)
+            }
+        }), 400
 
     if not parser.transactions:
-        # Provide detailed error info for debugging
         error_detail = "No transactions found in PDF."
         if parser.parse_errors:
             error_detail += f" Parse errors: {'; '.join(parser.parse_errors[:3])}"
@@ -1059,7 +998,6 @@ def upload_file():
             }
         }), 400
 
-    # Store in session
     session['uploaded_file'] = filepath
     session['account_info'] = parser.account_info
     session['total_transactions'] = len(parser.transactions)
@@ -1098,23 +1036,18 @@ def filter_transactions():
     if not os.path.exists(filepath):
         return jsonify({'error': 'Uploaded file expired. Please upload again.'}), 400
 
-    # Re-parse
     parser = PDFStatementParser(filepath)
     parser.extract_text()
     parser.parse_account_info()
     parser.parse_transactions()
 
-    # Get filter parameters
     data = request.get_json() or request.form
-
     filtered = parser.transactions[:]
 
-    # Branch filter
     branch = data.get('branch', '').strip()
     if branch:
         filtered = [t for t in filtered if branch.lower() in t.branch.lower()]
 
-    # Date range filter
     start_date = data.get('start_date', '').strip()
     end_date = data.get('end_date', '').strip()
     if start_date and end_date:
@@ -1125,7 +1058,6 @@ def filter_transactions():
         except ValueError:
             pass
 
-    # Amount filter
     min_amount = data.get('min_amount', '').strip()
     max_amount = data.get('max_amount', '').strip()
     if min_amount:
@@ -1139,20 +1071,16 @@ def filter_transactions():
         except ValueError:
             pass
 
-    # Transaction type filter
     txn_type = data.get('transaction_type', '').strip().upper()
     if txn_type in ['CR', 'DR']:
         filtered = [t for t in filtered if t.transaction_type == txn_type]
 
-    # Keyword filter
     keyword = data.get('keyword', '').strip()
     if keyword:
         filtered = [t for t in filtered if keyword.lower() in t.description.lower()]
 
-    # Store filtered results
     session['filtered_transactions'] = [t.to_dict() for t in filtered]
 
-    # Calculate stats
     cr_total = sum(t.amount for t in filtered if t.transaction_type == 'CR')
     dr_total = sum(t.amount for t in filtered if t.transaction_type == 'DR')
 
@@ -1179,6 +1107,8 @@ def download_file(format):
     unique_id = str(uuid.uuid4())[:8]
 
     if format == 'pdf':
+        if not REPORTLAB_AVAILABLE:
+            return jsonify({'error': 'PDF generation not available. Install reportlab.'}), 500
         output_path = os.path.join(app.config['OUTPUT_FOLDER'], f"filtered_{unique_id}.pdf")
         generator = StatementGenerator(account_info, output_path)
         generator.generate_pdf(transactions, title="Filtered Statement")
